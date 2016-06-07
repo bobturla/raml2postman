@@ -7,6 +7,8 @@ var path = require('path');
 var _ = require('lodash');
 
 function parseArguments() {
+    let methodFilter = '';
+
     program
         .version('0.0.1')
         .usage('[option]')
@@ -14,7 +16,9 @@ function parseArguments() {
         .option('-o, --output <file>', 'Store the collection in a file')
         .option('-g, --group', 'Group the requests into folders')
         .option('-t, --test', 'Test the converter')
-        .option('-p, --pretty', 'Pretty print the json file');
+        .option('-p, --pretty', 'Pretty print the json file')
+        .option('-h, --https', 'baseUri protocol. Defaults to http')
+        .option('-m  --methodFilter [method]', 'method filter', val => {methodFilter = val.split()[0].toLowerCase()});
 
     program.on('--help', function() {
         console.log('   Converts a RAML API spec to a POSTMan collection');
@@ -38,6 +42,7 @@ function parseArguments() {
     var group = program.group || false;
     var prettyPrint = program.pretty || false;
     var test = program.test || false;
+    var protocol = program.https ? 'https' : 'http';
 
     if (test) {
 
@@ -115,7 +120,9 @@ function parseArguments() {
             // file, options, callback
             Converter._convert(inputFile, {
                 group: group,
-                test: false
+                test: false,
+                protocol,
+                methodFilter
             }, callback);
         } else {
             program.emit('--help');

@@ -40,14 +40,14 @@ var converter = {
     },
 
     parseFile: function(filename, callback) {
-        var oldThis = this;
-        raml.loadFile(filename).then(function(data) {
+        // var oldThis = this;
+        raml.loadFile(filename).then((data) => {
             try {
-                oldThis.convert(data);
+                this.convert(data);
 
                 // Validate before invoking callback;
-                if (oldThis.validate()) {
-                    var sf = oldThis.sampleFile;
+                if (this.validate()) {
+                    var sf = this.sampleFile;
                     var env = _.clone(sf.environment, true);
 
                     delete sf.environment;
@@ -72,8 +72,8 @@ var converter = {
 
         var paramDescription = 'Parameters:\n\n';
 
-        _.forOwn(res.uriParameters, function(val, urlParam) {
-            res.relativeUri = res.relativeUri.replace('{' + urlParam + '}', ":" + urlParam);
+        _.forOwn(res.uriParameters, (val, urlParam) => {
+            res.relativeUri = res.relativeUri.replace('{' + urlParam + '}', '{{' + urlParam + '}}');
             this.addEnvKey(urlParam, val.type, val.displayName);
 
             val.description = val.description || "";
@@ -85,7 +85,7 @@ var converter = {
         // Only new params affect this part. Old params have been converted already.
 
         _.forOwn(res.baseUriParameters, function(val, urlParam) {
-            baseUri = baseUri.replace('{' + urlParam + '}', ":" + urlParam);
+            baseUri = baseUri.replace('{' + urlParam + '}', '{{' + urlParam + '}}');
             this.addEnvKey(urlParam, val.type, val.displayName);
         }, this);
 
@@ -109,7 +109,11 @@ var converter = {
         }
 
         // Convert own methods.
-        _.forEach(res.methods, function(req) {
+        if(this.methodFilter){
+            res.methods = _.filter(res.methods, { 'method': this.methodFilter });
+        }
+        
+        _.forEach(res.methods, (req) => {
 
             // Make a deep copy of the the sampleRequest.
             var request = _.clone(this.sampleRequest, true);
@@ -194,13 +198,25 @@ var converter = {
                 }
             }, this);
 
+            // Extract JSON schema for response application/json
+            let responseSchema = _.get(req,
+                'responses.200.body.application/json.schema',
+                _.get(req,
+                    'responses.201.body.application/json.schema', null)
+            );
+
+            // Add a validation test using extracted response schema
+            request.tests = this.addResponseSchemaValidation(responseSchema);
+
+            // Add request headers
             request.headers = headerString;
+
             this.sampleFile.requests.push(request);
             this.currentFolder.order.push(request.id);
         }, this);
 
         // Convert child resources.
-        _.forEach(res.resources, function(subRes) {
+        _.forEach(res.resources, (subRes) => {
             this.convertResource(subRes, resourceUri);
         }, this);
 
@@ -223,6 +239,16 @@ var converter = {
                 id: oldThis.sampleFile.id
             };
         }
+    },
+
+    addResponseSchemaValidation: (responseSchema) => {
+        let testString = '';
+        if (responseSchema) {
+            testString += 'var schema = ' + responseSchema + ';\n';
+            testString += 'var data = JSON.parse(responseBody);\n'
+            testString += 'tests["Valid Schema"] = tv4.validateResult(data, schema).valid;';
+        }
+        return testString;
     },
 
     read: function(location) {
@@ -346,10 +372,13 @@ var converter = {
         sf.environment.timestamp = this.generateTimestamp();
         sf.environment.id = this.generateId();
 
+        // Set specified protocol
+        this.data.baseUri = this.data.baseUri.replace(/^https?/, this.protocol);
+
         // BaseURI Conversion
-        _.forOwn(this.data.baseUriParameters, function(val, param) {
+        _.forOwn(this.data.baseUriParameters, (val, param) => {
             // Version will be specified in the baseUriParameters
-            this.data.baseUri = this.data.baseUri.replace("{" + param + "}", ":" + param);
+            this.data.baseUri = this.data.baseUri.replace("{" + param + "}", "{{" + param + "}}");
 
             this.addEnvKey(param, val.type, val.displayName);
         }, this);
@@ -362,7 +391,7 @@ var converter = {
         //     val = this.schemaToJSON(JSON.parse(val));
         // }, this);
 
-        _.forEach(this.data.resources, function(resource) {
+        _.forEach(this.data.resources, (resource) => {
             // Initialize the currentFolder
             this.currentFolder.id = sf.id;
 
@@ -395,9 +424,12 @@ var converter = {
         var file = path.resolve(__dirname, inputFile);
 
         this.group = options.group;
+        this.protocol = options.protocol;
+        this.methodFilter = options.methodFilter;
 
         // Set to true to generate test file.
         this.test = options.test;
+
 
         this.parseFile(file, cb);
     },
